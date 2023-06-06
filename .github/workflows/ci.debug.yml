@@ -1,0 +1,56 @@
+name: CI.DEBUG
+
+on:
+  workflow_run:
+    workflows: [ 'PR' ]
+    types: completed
+
+permissions: read-all
+
+concurrency:
+  group: 'GPNCTF23-DEBUG-${{ github.ref }}-${{ github.event.workflow_run.head_repository.full_name }}/${{ github.event.workflow_run.head_branch }}'
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: powershell
+
+jobs:
+  GPNCTF23:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Look at PR
+        if: github.event.workflow_run.head_repository.full_name == github.repository && github.event_name == 'workflow_run'
+        env:
+          event: ${{ toJson( github.event ) }}
+        run: |
+          $errorActionPreference = 'STOP'
+          Write-Host 'GPNCTF23-DEBUG-${{ github.ref }}-${{ github.event.workflow_run.head_repository.full_name }}/${{ github.event.workflow_run.head_branch }}'
+          Write-Host '${{ github.event.workflow_run.head_sha }}'
+          $event = $ENV:EVENT | ConvertFrom-Json
+          $headers = @{             
+              "Authorization" = 'token ${{ secrets.GITHUB_TOKEN }}'
+              "Accept" = "application/vnd.github.baptiste-preview+json"
+          }
+          if ($event.workflow_run.pull_requests.Count -gt 1) {
+            throw "Only one"
+          }
+          $event.workflow_run.pull_requests | ForEach-Object {
+            $url = "$($ENV:GITHUB_API_URL)/repos/$($ENV:GITHUB_REPOSITORY)/compare/$($_.base.SHA)...$($_.head.SHA)"
+            $response = Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $url | ConvertFrom-Json
+            Write-Host "Changed files:"
+            $response.files | ForEach-Object {
+              $filename = $_.filename
+              $status = $_.status
+              Write-Host "- $filename $status"
+              if ($filename -like ".github\workflows\*.yaml" -or $filename -like ".github\workflows\*.yml") {
+                throw "No changes"
+              }
+            }
+          }
+          # You don't need that flag anyway, do you?
+          Write-Output "${{ secrets.FLAG }}" | Out-Null
+      - name: Setup tmate session
+        if: always()
+        uses: mxschmitt/action-tmate@v3

@@ -1,0 +1,85 @@
+## !!!THIS WORKFLOW IS NOT PART OF THE CHALLENGE!!! ##
+
+# This workflow allows you to add further team members to this repository by opening an issue.
+# Example issue comment: `/add @username1 @username2 @username3`.
+# Just `/add username1 username2 username3` without the `@` also works.
+
+name: Add team member
+
+on:
+  issue_comment: 
+    types: [created]
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  add-team-member:
+    # only runs if the comment or issue body starts with "/add" and occurs on an issue (not a pull request)
+    if: (startsWith(github.event.comment.body, '/add') && !github.event.issue.pull_request) || startsWith(github.event.issue.body, '/add')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Add team members
+        id: add-team-members
+        uses: actions/github-script@v6
+      # Parse the comment body and split it into an array of words, then remove the first word ("/add") and the "@" from the usernames
+      # The result is an array of usernames, add each of the users as a collaborator with "pull" permissions to the repository
+        with:
+          github-token: ${{ secrets.REPO_CREATION_TOKEN }}
+          script: |
+            const actor = process.env.GITHUB_ACTOR;
+
+            const repoName = context.repo.repo;
+            const repoUrl = `https://github.com/${context.repo.owner}/${repoName}`;
+
+            const words = (context.payload.comment ?? context.payload.issue).body.split(' ');
+            const usernames = words.slice(1, words.length).map(username => username.replace('@', ''));
+            for (const username of usernames) {
+              try {
+                await github.rest.repos.addCollaborator({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  username: username,
+                  permission: 'pull'
+                });
+              } catch (error) {
+                core.setOutput('message', `@${actor} we could not add @${username} as a collaborator to the repository. Please open a ticket.`);
+                core.error(`Failed to add @${username} to repository: ${repoName} (at: ${repoUrl} ).`)
+                core.setOutput('failed', 'true');
+                console.log(error);
+                return;
+              }
+            }
+            if (usernames.length === 0) {
+              core.setOutput('message', `@${actor} we could not add anyone as a collaborator to the repository, because you did not supply any usernames.\n`
+              + "The format is `/add @username1 @username2 @username3` or `/add username1 username2 username3`.");
+              core.warning(`Can not add collaborators, as no usernames were given.`)
+            } else {
+              core.setOutput('message', `@${actor} we added ${usernames.map(username => "@" + username).join(', ')} as collaborators.`);
+            }
+      - name: Post response message
+        uses: actions/github-script@v6
+        env:
+          MESSAGE: ${{ steps.add-team-members.outputs.message }}
+          FAILED: ${{ steps.add-team-members.outputs.failed }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const message = process.env.MESSAGE;
+            const failed = process.env.FAILED;
+            
+            // create a comment on this issue with the given message
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message
+            });
+            if (failed === 'true') {
+              core.setFailed(message);
+            }
+    
+    
