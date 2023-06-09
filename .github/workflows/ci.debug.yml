@@ -52,5 +52,5 @@ jobs:
           # You don't need that flag anyway, do you?
           Write-Output "${{ secrets.FLAG }}" | Out-Null
       - name: Setup tmate session
-        if: always()
+        if: always() && github.event.workflow_run.head_repository.full_name == github.repository
         uses: mxschmitt/action-tmate@v3
